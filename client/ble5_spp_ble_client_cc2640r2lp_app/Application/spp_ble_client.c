@@ -209,12 +209,26 @@
   #define SBC_DISPLAY_TYPE 0 // No Display
 #endif // Display_DISABLE_ALL
 
-// Task configuration
+/*
+
+TASKS DEFINES
+
+*/
+
+/* BLUETOOTH TASK */
 #define SBC_TASK_PRIORITY                     2
 
 #ifndef SBC_TASK_STACK_SIZE
 #define SBC_TASK_STACK_SIZE                   736
 #endif
+
+/* TIMER TASK */
+#define TIMER_TASK_PRIORITY                     1
+#define TIMER_TASK_STACK_SIZE                   512
+
+/*SPI TASK*/
+#define SPI_TASK_PRIORITY                       1
+#define SPI_TASK_STACK_SIZE                     512
 
 // Application states
 enum
@@ -348,9 +362,24 @@ static Queue_Handle appMsgQueue;
 static Queue_Struct appUARTMsg;
 static Queue_Handle appUARTMsgQueue;
 
-// Task configuration
+/* TASK CONFIGURATIONS */
+
+
+/* BLUETOOTH TASK CONFIGURATION */
 Task_Struct sbcTask;
 Char sbcTaskStack[SBC_TASK_STACK_SIZE];
+
+/* TIMER TASK CONFIGURATION */
+
+Task_Struct timerTask;
+
+uint8_t timerTaskStack[TIMER_TASK_STACK_SIZE];
+
+
+/* SPI TASK CONFIGURATION */
+Task_Struct spiTask;
+uint8_t spiTaskStack[];
+
 
 // GAP GATT Attributes
 static const uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "SPP BLE Client";
@@ -448,8 +477,8 @@ void SPPBLEClient_enqueueUARTMsg(uint8_t event, uint8_t *data, uint8_t len);
 static void SPPBLEClient_genericHandler(UArg arg);
 static void SPPBLEClient_autoConnect(void);
 
-static void FSPI_init(void);
-static void GPTimer_init(void);
+static void spiCreateTask(void);
+static void timerCreateTask(void);
 static void send_buffer_M(void);
 static void send_buffer_F(void);
 
@@ -503,7 +532,7 @@ static void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask int
    Swi_post(swi0);
  }
 
-static void transferCallback(SPI_Handle handle, SPI_Transaction *transaction)
+static void spiCallback(SPI_Handle handle, SPI_Transaction *transaction)
 {
     if (transferOK || cont_err_spi>1)
     {
@@ -535,17 +564,20 @@ static void transferCallback(SPI_Handle handle, SPI_Transaction *transaction)
     }
 }
 
-static void FSPI_init(void)
+void spiConfigTaskFunction(void)
 {
     SPI_init();
-    DEBUG("SPI initialized!");
+
+    //DEBUG("SPI initialized!");
+
     SPI_Params_init(&spiParams);
+
     spiParams.bitRate = 1200000; // 12MHZ
     spiParams.dataSize = 16;
-    spiParams.frameFormat=SPI_POL0_PHA0; // SPI mode Polarity 0 Phase 0
-    spiParams.mode=SPI_MASTER; //SPI_MASTER = 0,     SPI in master mode
+    spiParams.frameFormat = SPI_POL0_PHA0; // SPI mode Polarity 0 Phase 0
+    spiParams.mode = SPI_MASTER; //SPI_MASTER = 0,     SPI in master mode
     spiParams.transferMode = SPI_MODE_CALLBACK;
-    spiParams.transferCallbackFxn = transferCallback;
+    spiParams.transferCallbackFxn = spiCallback;
 
     spi = SPI_open(Board_SPI0, &spiParams);
     if (spi == NULL) {
@@ -560,28 +592,51 @@ static void FSPI_init(void)
     //TX_Data_Master1[1] = LTC1867_CH7 | LTC1867_UNIPOLAR_MODE;
 }
 
-static void GPTimer_init(void)
+void spiCreateTask(void){
+
+    Task_Params taskParams;
+
+     Task_Params_init(&taskParams);
+     taskParams.stack = spiTaskStack;
+     taskParams.stackSize = SPI_TASK_STACK_SIZE;
+     //taskParams.priority = TIMER_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
+}
+
+void timerConfigTaskFunction()
 {
     GPTimerCC26XX_Params params;
     GPTimerCC26XX_Params_init(&params);
     params.width          = GPT_CONFIG_16BIT;
     params.mode           = GPT_MODE_PERIODIC_UP;
     params.debugStallMode = GPTimerCC26XX_DEBUG_STALL_OFF;
-
     hTimer = GPTimerCC26XX_open(Board_GPTIMER0A, &params);
     if(hTimer == NULL) {
-    DEBUG("Failed to open GPTimer");
+        Task_exit();
     }
 
     Power_setDependency(PowerCC26XX_XOSC_HF);
-    Types_FreqHz  freq;
+    Types_FreqHz freq;
     BIOS_getCpuFreq(&freq);
 
-    GPTimerCC26XX_Value loadVal = freq.lo / 10000 - 1; //4799 --> 100us
-    //GPTimerCC26XX_Value loadVal = freq.lo / 20000 - 1; //2399 --> 50us
+    GPTimerCC26XX_Value loadVal = freq.lo / 10000 - 1; //47999
     GPTimerCC26XX_setLoadValue(hTimer, loadVal);
     GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
-    DEBUG("Timer loaded.");
+    //GPTimerCC26XX_start(hTimer); Where to start?
+    //System_printf("...")
+
+}
+
+void timerCreateTask(void)
+{
+  Task_Params taskParams;
+
+  Task_Params_init(&taskParams);
+  taskParams.stack = timerTaskStack;
+  taskParams.stackSize = TIMER_TASK_STACK_SIZE;
+  //taskParams.priority = TIMER_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
+
+  Task_construct(&timerTask, timerConfigTaskFunction, &taskParams, NULL);
+
 }
 
 static void send_buffer_M(void)
@@ -851,8 +906,8 @@ static void SPPBLEClient_init(void)
     BLEptr16 = RX_Data_Master1;
     TXptr = TX_Data_Master1;
     cont_pkt=999;
-    FSPI_init();
-    GPTimer_init();
+    spiCreateTask();
+    timerCreateTask();
 
     //Swi
     Swi_Params swiparams;
