@@ -303,7 +303,7 @@ SPI_Handle      spi;
 SPI_Params      spiParams;
 SPI_Transaction spiTransaction;
 uint16_t TX_Data_Master1[2] = {0x8484, 0xF4F4};
-int16_t RX_Data_Master1[200];
+uint16_t RX_Data_Master1[200];
 uint8_t RX_Data_Master2[2] = {0x00, 0x00};
 uint8_t    *BLEptr8;
 uint16_t    *BLEptr16;
@@ -403,11 +403,11 @@ static PIN_Config SPPBLEAppPinTable[] =
 {
     Board_RLED       | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,     /* LED initially off             */
     Board_GLED       | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,     /* LED initially off             */
-    LAUNCHXL_SPI0_CSN | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL | PIN_DRVSTR_MAX,       /* SPI CSN */
+    CC2640R2_LAUNCHXL_SPI0_CSN | PIN_GPIO_OUTPUT_EN | PIN_GPIO_HIGH | PIN_PUSHPULL | PIN_DRVSTR_MAX,       /* SPI CSN */
     PIN_TERMINATE
 };
 
-static uint8 currentPHY = HCI_PHY_1_MBPS;
+//static uint8 currentPHY = HCI_PHY_1_MBPS;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -498,8 +498,8 @@ void swi0Fxn (UArg arg1, UArg arg2)
 }
 
 static void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask interruptMask) {
-   PIN_setOutputValue(hGpioPin, LAUNCHXL_SPI0_CSN, 1);
-   PIN_setOutputValue(hGpioPin, LAUNCHXL_SPI0_CSN, 0);
+   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 1);
+   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 0);
    Swi_post(swi0);
  }
 
@@ -587,10 +587,10 @@ static void GPTimer_init(void)
 static void send_buffer_M(void)
 {
     int8_t    *BLEptr8_M;
-    uint8_t status;
+    //uint8_t status;
     attWriteReq_t req;
     req.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ, 202, NULL);
-    BLEptr8_M = RX_Data_Master1;
+    BLEptr8_M = (int8_t *)RX_Data_Master1;
     if ( req.pValue != NULL )
      {
         req.pValue[0]=(cont_pkt&0xFF00)>>8;
@@ -600,7 +600,8 @@ static void send_buffer_M(void)
         req.len = 202;
         req.sig = 0;
         req.cmd = 1;
-        status = GATT_WriteNoRsp(connHandle, &req);
+        //status = GATT_WriteNoRsp(connHandle, &req);
+        GATT_WriteNoRsp(connHandle, &req);
         cont_pkt +=1;
         int_tentativa=0;
         if (cont_pkt>=5000)
@@ -626,10 +627,10 @@ static void send_buffer_M(void)
 static void send_buffer_F(void)
 {
     int8_t    *BLEptr8_F;
-    uint8_t status;
+    //uint8_t status;
     attWriteReq_t req;
     req.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ, 202, NULL);
-    BLEptr8_F = &RX_Data_Master1[100];
+    BLEptr8_F = (int8_t *)&RX_Data_Master1[100];
     if ( req.pValue != NULL )
      {
         req.pValue[0]=(cont_pkt&0xFF00)>>8;
@@ -639,7 +640,8 @@ static void send_buffer_F(void)
         req.len = 202;
         req.sig = 0;
         req.cmd = 1;
-        status = GATT_WriteNoRsp(connHandle, &req);
+        //status = GATT_WriteNoRsp(connHandle, &req);
+        GATT_WriteNoRsp(connHandle, &req);
         cont_pkt +=1;
         if (cont_pkt>=5000)
         {
@@ -845,7 +847,7 @@ static void SPPBLEClient_init(void)
 
     Power_setDependency(PowerCC26XX_XOSC_HF);
 
-    BLEptr8 = RX_Data_Master1;
+    BLEptr8 = (uint8 *)RX_Data_Master1;
     BLEptr16 = RX_Data_Master1;
     TXptr = TX_Data_Master1;
     cont_pkt=999;
@@ -865,8 +867,8 @@ static void SPPBLEClient_init(void)
     SPPBLEClient_blinkLed(Board_GLED, 2);
 
   // read first sample only to throw out
-    PIN_setOutputValue(hGpioPin, LAUNCHXL_SPI0_CSN, 1);
-    PIN_setOutputValue(hGpioPin, LAUNCHXL_SPI0_CSN, 0);
+    PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 1);
+    PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 0);
     Swi_post(swi0);
 }
 
@@ -917,7 +919,7 @@ static void SPPBLEClient_taskFxn(UArg a0, UArg a1)
         // SPI EVENT
         if (events & SBC_SPI)
         {
-            PIN_setOutputValue(hGpioPin, LAUNCHXL_SPI0_CSN, 0);
+            PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 0);
             SPI_transfer(spi, &spiTransaction);
         }
 
@@ -1105,7 +1107,7 @@ static void SPPBLEClient_processStackMsg(ICall_Hdr *pMsg)
                   DEBUG("PHY Changed to: ");
                   DEBUG((uint8_t*)((pPUC->rxPhy == HCI_PHY_1_MBPS) ? "1 Mbps" : "2 Mbps"));
                   DEBUG_NEWLINE();
-                  currentPHY = pPUC->rxPhy;
+                  //currentPHY = pPUC->rxPhy;
                 }
               }
             }
@@ -1480,7 +1482,7 @@ static void SPPBLEClient_processGATTMsg(gattMsgEvent_t *pMsg)
             cont_amt=10;
             selected_ch=1;
             cont_pkt = 999;
-            BLEptr8 = RX_Data_Master1;
+            BLEptr8 = (uint8 *)RX_Data_Master1;
             BLEptr16 = RX_Data_Master1;
             TXptr = TX_Data_Master1;
             spiTransaction.txBuf = TXptr++;
