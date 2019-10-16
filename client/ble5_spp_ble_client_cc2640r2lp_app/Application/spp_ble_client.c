@@ -209,13 +209,7 @@
   #define SBC_DISPLAY_TYPE 0 // No Display
 #endif // Display_DISABLE_ALL
 
-/*
-
-TASKS DEFINES
-
-*/
-
-/* BLUETOOTH TASK */
+// Task configuration
 #define SBC_TASK_PRIORITY                     2
 
 #ifndef SBC_TASK_STACK_SIZE
@@ -223,12 +217,32 @@ TASKS DEFINES
 #endif
 
 /* TIMER TASK */
-#define TIMER_TASK_PRIORITY                     1
+#define TIMER_TASK_PRIORITY                     2
 #define TIMER_TASK_STACK_SIZE                   512
 
 /*SPI TASK*/
-#define SPI_TASK_PRIORITY                       1
+#define SPI_TASK_PRIORITY                       2
 #define SPI_TASK_STACK_SIZE                     512
+
+/* TASK CONFIGURATIONS */
+
+
+/* BLUETOOTH TASK CONFIGURATION */
+Task_Struct sbcTask;
+Char sbcTaskStack[SBC_TASK_STACK_SIZE];
+
+/* TIMER TASK CONFIGURATION */
+
+Task_Handle timerTask;
+uint8_t timerTaskStack[TIMER_TASK_STACK_SIZE];
+
+
+/* SPI TASK CONFIGURATION */
+
+Task_Handle spiTask;
+uint8_t spiTaskStack[];
+
+
 
 // Application states
 enum
@@ -317,7 +331,7 @@ SPI_Handle      spi;
 SPI_Params      spiParams;
 SPI_Transaction spiTransaction;
 uint16_t TX_Data_Master1[2] = {0x8484, 0xF4F4};
-uint16_t RX_Data_Master1[200];
+int16_t RX_Data_Master1[200];
 uint8_t RX_Data_Master2[2] = {0x00, 0x00};
 uint8_t    *BLEptr8;
 uint16_t    *BLEptr16;
@@ -362,24 +376,9 @@ static Queue_Handle appMsgQueue;
 static Queue_Struct appUARTMsg;
 static Queue_Handle appUARTMsgQueue;
 
-/* TASK CONFIGURATIONS */
-
-
-/* BLUETOOTH TASK CONFIGURATION */
+// Task configuration
 Task_Struct sbcTask;
 Char sbcTaskStack[SBC_TASK_STACK_SIZE];
-
-/* TIMER TASK CONFIGURATION */
-
-Task_Struct timerTask;
-
-uint8_t timerTaskStack[TIMER_TASK_STACK_SIZE];
-
-
-/* SPI TASK CONFIGURATION */
-Task_Struct spiTask;
-uint8_t spiTaskStack[];
-
 
 // GAP GATT Attributes
 static const uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "SPP BLE Client";
@@ -477,8 +476,6 @@ void SPPBLEClient_enqueueUARTMsg(uint8_t event, uint8_t *data, uint8_t len);
 static void SPPBLEClient_genericHandler(UArg arg);
 static void SPPBLEClient_autoConnect(void);
 
-static void spiCreateTask(void);
-static void timerCreateTask(void);
 static void send_buffer_M(void);
 static void send_buffer_F(void);
 
@@ -520,19 +517,7 @@ static gapBondCBs_t SPPBLEClient_bondCB =
  *
  * @return  none
  */
-
-void swi0Fxn (UArg arg1, UArg arg2)
-{
-     cont_err_spi=0;transferOK = SPI_transfer(spi, &spiTransaction);
-}
-
-static void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask interruptMask) {
-   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 1);
-   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 0);
-   Swi_post(swi0);
- }
-
-static void spiCallback(SPI_Handle handle, SPI_Transaction *transaction)
+static void transferCallback(SPI_Handle handle, SPI_Transaction *transaction)
 {
     if (transferOK || cont_err_spi>1)
     {
@@ -566,6 +551,7 @@ static void spiCallback(SPI_Handle handle, SPI_Transaction *transaction)
 
 void spiConfigTaskFunction(void)
 {
+    DEBUG("SPI TASK");
     SPI_init();
 
     //DEBUG("SPI initialized!");
@@ -577,7 +563,7 @@ void spiConfigTaskFunction(void)
     spiParams.frameFormat = SPI_POL0_PHA0; // SPI mode Polarity 0 Phase 0
     spiParams.mode = SPI_MASTER; //SPI_MASTER = 0,     SPI in master mode
     spiParams.transferMode = SPI_MODE_CALLBACK;
-    spiParams.transferCallbackFxn = spiCallback;
+    spiParams.transferCallbackFxn = transferCallback;
 
     spi = SPI_open(Board_SPI0, &spiParams);
     if (spi == NULL) {
@@ -590,6 +576,7 @@ void spiConfigTaskFunction(void)
     spiTransaction.rxBuf = RX_Data_Master2;
     //TX_Data_Master1[0] = LTC1867_CH0 | LTC1867_UNIPOLAR_MODE;
     //TX_Data_Master1[1] = LTC1867_CH7 | LTC1867_UNIPOLAR_MODE;
+    Task_exit();
 }
 
 void spiCreateTask(void){
@@ -599,11 +586,21 @@ void spiCreateTask(void){
      Task_Params_init(&taskParams);
      taskParams.stack = spiTaskStack;
      taskParams.stackSize = SPI_TASK_STACK_SIZE;
-     //taskParams.priority = TIMER_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
+     taskParams.priority = SPI_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
+
+     spiTask = Task_create((Task_FuncPtr)spiConfigTaskFunction, &taskParams, NULL);
+
 }
+
+static void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask interruptMask) {
+   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 1);
+   PIN_setOutputValue(hGpioPin, CC2640R2_LAUNCHXL_SPI0_CSN, 0);
+   Swi_post(swi0);
+ }
 
 void timerConfigTaskFunction()
 {
+    DEBUG("TIMER TASK CONFIG FUNCTION");
     GPTimerCC26XX_Params params;
     GPTimerCC26XX_Params_init(&params);
     params.width          = GPT_CONFIG_16BIT;
@@ -620,10 +617,11 @@ void timerConfigTaskFunction()
 
     GPTimerCC26XX_Value loadVal = freq.lo / 10000 - 1; //47999
     GPTimerCC26XX_setLoadValue(hTimer, loadVal);
-    GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
+    GPTimerCC26XX_registerInterrupt(hTimer, (GPTimerCC26XX_HwiFxn)timerCallback, GPT_INT_TIMEOUT);
     //GPTimerCC26XX_start(hTimer); Where to start?
     //System_printf("...")
 
+    Task_exit();
 }
 
 void timerCreateTask(void)
@@ -633,11 +631,21 @@ void timerCreateTask(void)
   Task_Params_init(&taskParams);
   taskParams.stack = timerTaskStack;
   taskParams.stackSize = TIMER_TASK_STACK_SIZE;
-  //taskParams.priority = TIMER_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
+  taskParams.priority = TIMER_TASK_PRIORITY; //Same as before, defaults to some value in Task_construct
 
-  Task_construct(&timerTask, timerConfigTaskFunction, &taskParams, NULL);
+  timerTask = Task_create((Task_FuncPtr)timerConfigTaskFunction, &taskParams, NULL);
+
+  if (timerTask == NULL){
+      System_abort("Error creating timer task.");
+  }
 
 }
+
+void swi0Fxn (UArg arg1, UArg arg2)
+{
+     cont_err_spi=0;transferOK = SPI_transfer(spi, &spiTransaction);
+}
+
 
 static void send_buffer_M(void)
 {
@@ -645,7 +653,7 @@ static void send_buffer_M(void)
     //uint8_t status;
     attWriteReq_t req;
     req.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ, 202, NULL);
-    BLEptr8_M = (int8_t *)RX_Data_Master1;
+    BLEptr8_M = (int8_t *) RX_Data_Master1;
     if ( req.pValue != NULL )
      {
         req.pValue[0]=(cont_pkt&0xFF00)>>8;
@@ -655,7 +663,6 @@ static void send_buffer_M(void)
         req.len = 202;
         req.sig = 0;
         req.cmd = 1;
-        //status = GATT_WriteNoRsp(connHandle, &req);
         GATT_WriteNoRsp(connHandle, &req);
         cont_pkt +=1;
         int_tentativa=0;
@@ -685,7 +692,7 @@ static void send_buffer_F(void)
     //uint8_t status;
     attWriteReq_t req;
     req.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ, 202, NULL);
-    BLEptr8_F = (int8_t *)&RX_Data_Master1[100];
+    BLEptr8_F = (int8_t *) &RX_Data_Master1[100];
     if ( req.pValue != NULL )
      {
         req.pValue[0]=(cont_pkt&0xFF00)>>8;
@@ -695,7 +702,6 @@ static void send_buffer_F(void)
         req.len = 202;
         req.sig = 0;
         req.cmd = 1;
-        //status = GATT_WriteNoRsp(connHandle, &req);
         GATT_WriteNoRsp(connHandle, &req);
         cont_pkt +=1;
         if (cont_pkt>=5000)
@@ -902,12 +908,10 @@ static void SPPBLEClient_init(void)
 
     Power_setDependency(PowerCC26XX_XOSC_HF);
 
-    BLEptr8 = (uint8 *)RX_Data_Master1;
-    BLEptr16 = RX_Data_Master1;
+    BLEptr8 = (uint8_t *) RX_Data_Master1;
+    BLEptr16 = (uint16_t *) RX_Data_Master1;
     TXptr = TX_Data_Master1;
     cont_pkt=999;
-    spiCreateTask();
-    timerCreateTask();
 
     //Swi
     Swi_Params swiparams;
@@ -938,12 +942,17 @@ static void SPPBLEClient_init(void)
  */
 static void SPPBLEClient_taskFxn(UArg a0, UArg a1)
 {
+  DEBUG("SPPBLECLIENT TASK FUNCTION");
+  //Delete hardware initialization tasks
+  Task_delete(&timerTask);
+  Task_delete(&spiTask);
   // Initialize application
   SPPBLEClient_init();
 
   // Application main loop
   for (;;)
   {
+    DEBUG("SUPER LOOP \n");
     uint32_t events;
 
     events = Event_pend(syncEvent, Event_Id_NONE, SBC_ALL_EVENTS,
@@ -1537,8 +1546,8 @@ static void SPPBLEClient_processGATTMsg(gattMsgEvent_t *pMsg)
             cont_amt=10;
             selected_ch=1;
             cont_pkt = 999;
-            BLEptr8 = (uint8 *)RX_Data_Master1;
-            BLEptr16 = RX_Data_Master1;
+            BLEptr8 = (uint8_t *) RX_Data_Master1;
+            BLEptr16 =(uint16_t *) RX_Data_Master1;
             TXptr = TX_Data_Master1;
             spiTransaction.txBuf = TXptr++;
             //spiTransaction.rxBuf = BLEptr16;
