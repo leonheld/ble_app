@@ -158,6 +158,10 @@ int main()
   /* SDI UART Example Task - Priority 2 */
   SDITask_createTask();
 
+  /*Hardware Initialization Tasks - MUST(!!!) be run before SPPBLEClient_createTask*/
+  timerCreateTask();
+  spiCreateTask();
+
   /* Kick off application - Priority 1 */
   SPPBLEClient_createTask();
 
